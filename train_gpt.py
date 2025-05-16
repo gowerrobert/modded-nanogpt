@@ -19,6 +19,36 @@ import torch.distributed as dist
 # use of FlexAttention contributed by @KoszarskyB
 from torch.nn.attention.flex_attention import BlockMask, flex_attention
 #torch._inductor.config.coordinate_descent_tuning = True # we have banned this flag for new records because it causes compilation to take 30min
+import argparse
+parser = argparse.ArgumentParser()
+parser.add_argument('--name', type=str, default=None, help='Run name for logging')
+parser.add_argument('--mat_sign', type=str, default=None, help='Name of matrix sign method')
+parser.add_argument('--num_iterations', type=int, default=2000, help='Number of iterations to run')
+args_cli = parser.parse_args()
+run_name = args_cli.name 
+num_GPUs =  int(os.environ["WORLD_SIZE"])
+import random
+import numpy as np
+def set_random_seed(seed: int):
+    random.seed(seed)  # Python random module
+    np.random.seed(seed)  # NumPy
+    torch.manual_seed(seed)  # PyTorch (CPU)
+    torch.cuda.manual_seed(seed)  # PyTorch (GPU)
+    torch.cuda.manual_seed_all(seed)  # PyTorch (all GPUs)
+    # Rob: I've commented these out because they slow down the execution
+    # torch.backends.cudnn.deterministic = True  # Ensure deterministic behavior
+    # torch.backends.cudnn.benchmark = False  # Disable auto-tuning for reproducibility
+
+# Set a fixed seed
+set_random_seed(42)
+
+with open(sys.argv[0]) as f:
+    code = f.read()
+# -----------------------------------------------------------------------------
+# Detect if FP8 is available
+fp8_available = hasattr(torch, "float8_e4m3fn") and hasattr(torch, "float8_e5m2")
+if not fp8_available:
+    print("FP8 is not available. Falling back to bfloat16.")
 
 # -----------------------------------------------------------------------------
 # Custom operators: FP8 matmul by @YouJiacheng
@@ -28,8 +58,12 @@ def mm_op(x: Tensor, w: Tensor, x_s: float, w_s: float, grad_s: float) -> tuple[
     @torch.compile
     def impl(x: Tensor, w: Tensor):
         assert x.is_contiguous() and w.is_contiguous()
-        x_f8 = x.div(x_s).to(torch.float8_e4m3fn)
-        w_f8 = w.div(w_s).to(torch.float8_e4m3fn)
+        if fp8_available:
+            x_f8 = x.div(x_s).to(torch.float8_e4m3fn)
+            w_f8 = w.div(w_s).to(torch.float8_e4m3fn)
+        else:
+            x_f8 = x.div(x_s).to(torch.bfloat16)
+            w_f8 = w.div(w_s).to(torch.bfloat16)
         out = torch._scaled_mm(
             x_f8,
             w_f8.T,
@@ -48,7 +82,10 @@ def _(x: Tensor, w: Tensor, *_):
     assert x.shape[1] == w.shape[1]
     assert x.device == w.device
     assert x.is_contiguous() and w.is_contiguous()
-    return x @ w.T, x.to(torch.float8_e4m3fn), w.to(torch.float8_e4m3fn)
+    if fp8_available:
+        return x @ w.T, x.to(torch.float8_e4m3fn), w.to(torch.float8_e4m3fn)
+    else:
+        return x @ w.T, x.to(torch.bfloat16), w.to(torch.bfloat16)
 
 @torch.library.custom_op("nanogpt::mm_backward", mutates_args=())
 def mm_backward_op(g: Tensor, x_f8: Tensor, w_f8: Tensor, x_s: float, w_s: float, grad_s: float) -> tuple[Tensor, Tensor]:
@@ -58,7 +95,10 @@ def mm_backward_op(g: Tensor, x_f8: Tensor, w_f8: Tensor, x_s: float, w_s: float
         x_inv_s = grad.new_tensor(x_s, dtype=torch.float32)
         w_inv_s = grad.new_tensor(w_s, dtype=torch.float32)
         grad_inv_s = grad.new_tensor(grad_s, dtype=torch.float32)
-        grad_f8 = grad.div(grad_s).to(torch.float8_e5m2)
+        if fp8_available:
+            grad_f8 = grad.div(grad_s).to(torch.float8_e5m2)
+        else:
+            grad_f8 = grad.div(grad_s).to(torch.bfloat16)
         grad_x = torch._scaled_mm(
             grad_f8,
             w_f8.T.contiguous().T,
@@ -67,7 +107,6 @@ def mm_backward_op(g: Tensor, x_f8: Tensor, w_f8: Tensor, x_s: float, w_s: float
             scale_b=w_inv_s,
             use_fast_accum=False,
         )
-        # faster than grad_f8_t @ x_f8, for (d_out, d_in) == (50304, 768)
         grad_w = torch._scaled_mm(
             x_f8.T.contiguous(),
             grad_f8.T.contiguous().T,
@@ -82,7 +121,10 @@ def mm_backward_op(g: Tensor, x_f8: Tensor, w_f8: Tensor, x_s: float, w_s: float
 
 @mm_backward_op.register_fake
 def _(g: Tensor, x_f8: Tensor, w_f8: Tensor, *_):
-    return x_f8.to(torch.bfloat16), w_f8.T.contiguous().T.to(torch.float32)
+    if fp8_available:
+        return x_f8.to(torch.bfloat16), w_f8.T.contiguous().T.to(torch.float32)
+    else:
+        return x_f8.to(torch.bfloat16), w_f8.T.contiguous().T.to(torch.float32)
 
 def backward(ctx, grad_out: Tensor, *_):
     x_f8, w_f8 = ctx.saved_tensors
@@ -103,6 +145,54 @@ mm_op.register_autograd(backward, setup_context=setup_context)
 
 # -----------------------------------------------------------------------------
 # Muon optimizer
+# Coefficients for the optimal polynomial beginning with l = 1e-3, u = 1
+
+
+from itertools import chain, islice, repeat
+our_coeffs_list = [
+    (8.28721201814563, -23.595886519098837, 17.300387312530933),
+    (4.107059111542203, -2.9478499167379106, 0.5448431082926601),
+    (3.9486908534822946, -2.908902115962949, 0.5518191394370137),
+    (3.3184196573706015, -2.488488024314874, 0.51004894012372),
+    (2.300652019954817, -1.6689039845747493, 0.4188073119525673),
+    (1.891301407787398, -1.2679958271945868, 0.37680408948524835),
+    (1.8750014808534479, -1.2500016453999487, 0.3750001645474248),
+    (1.875, -1.25, 0.375),
+]
+
+def deflate(abc, deflation_eps):
+    a, b, c = abc
+    return a / (1 + deflation_eps), b / (1 + deflation_eps)**3, c / (1 + deflation_eps)**5
+
+
+@torch.compile
+def polar_express(G: torch.Tensor, steps: int,   deflation_eps: float = 0.01):
+    assert G.ndim >= 2, "Input tensor must have at least two dimensions."
+    assert steps > 0, "Number of steps must be positive."
+
+    X = G.bfloat16()
+    if G.size(-2) > G.size(-1):  # opposite convention from our other code
+        X = X.mT
+    # Ensure spectral norm is at most 1
+    X = X / (X.norm(dim=(-2, -1), keepdim=True) * (1 + deflation_eps) + 1e-7)
+    # NOTE: it's very important to make `hs` a plain list, not an iterator.
+    # Don't do any CPU operations inside the loop, just GPU ops.
+    # Otherwise it could seriously slow down the code.
+    hs = [deflate(coefffs, deflation_eps) for coefffs in chain(
+        islice((our_coeffs_list), steps),
+        repeat(our_coeffs_list[-1], steps - len(our_coeffs_list)),
+    )]
+
+    for a, b, c in hs:
+        A = X @ X.mT
+        B = b * A + c * A @ A
+        X = a * X + B @ X
+  
+    if G.size(-2) > G.size(-1):
+        X = X.mT
+    return X
+
+
 
 @torch.compile
 def zeropower_via_newtonschulz5(G: Tensor, steps: int) -> Tensor:
@@ -132,6 +222,12 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int) -> Tensor:
     if G.size(-2) > G.size(-1):
         X = X.mT
     return X
+
+if args_cli.mat_sign == "polar":
+    mat_sign_function = polar_express
+else:
+    mat_sign_function = zeropower_via_newtonschulz5
+
 
 class Muon(torch.optim.Optimizer):
     """
@@ -193,7 +289,7 @@ class Muon(torch.optim.Optimizer):
                     buf: Tensor = state["momentum_buffer"]
                     buf.lerp_(g, 1 - group["momentum"])
                     g = g.lerp_(buf, group["momentum"]) if group["nesterov"] else buf
-                    g = zeropower_via_newtonschulz5(g, steps=group["ns_steps"]).flatten()
+                    g = mat_sign_function(g, steps=group["ns_steps"]).flatten() 
                 else:
                     g = update_buffer_views[self.rank]
                 if base_i > 0:
@@ -211,7 +307,7 @@ def norm(x: Tensor):
 class CastedLinear(nn.Linear):
     def __init__(self, in_features: int, out_features: int, use_fp8=False, x_s=1.0, w_s=1.0, grad_s=1.0):
         super().__init__(in_features, out_features, bias=False)
-        self.use_fp8 = use_fp8
+        self.use_fp8 = use_fp8 and fp8_available  # Only use FP8 if available
         self.x_s = x_s
         self.w_s = w_s
         self.grad_s = grad_s
@@ -444,10 +540,14 @@ class Hyperparameters:
     train_files = "data/fineweb10B/fineweb_train_*.bin" # input .bin to train on
     val_files = "data/fineweb10B/fineweb_val_*.bin" # input .bin to eval validation loss on
     val_tokens = 10485760 # how many tokens of validation data? it's important to keep this fixed for consistent comparisons
-    train_seq_len = 48*1024 # FlexAttention sequence length
-    val_seq_len = 4*64*1024 # FlexAttention sequence length for validation
+    # To reduce memory usage, we can use a smaller batch sizes 
+    train_seq_len = 6*num_GPUs*1024 # FlexAttention sequence length
+    val_seq_len = 32*num_GPUs*1024 # FlexAttention sequence length for validation
+    # Rob: Original settings
+    # train_seq_len = 48*1024 # FlexAttention sequence length  
+    # val_seq_len = 4*64*1024 # FlexAttention sequence length for validation
     # optimization
-    num_iterations = 1770 # number of iterations to run
+    num_iterations = args_cli.num_iterations # number of iterations to run, was 1770 before
     cooldown_frac = 0.4 # fraction of training spent cooling down the learning rate
     # architecture
     vocab_size = 50257
@@ -458,8 +558,8 @@ args = Hyperparameters()
 
 # torchrun sets these env variables
 rank = int(os.environ["RANK"])
-world_size = int(os.environ["WORLD_SIZE"])
-assert world_size == 8 # this code is designed for 8xH100
+world_size = num_GPUs  # dynamically determine the number of GPUs
+assert world_size > 0, "WORLD_SIZE must be greater than 0"
 assert torch.cuda.is_available()
 device = torch.device("cuda", int(os.environ["LOCAL_RANK"]))
 torch.cuda.set_device(device)
@@ -467,10 +567,26 @@ dist.init_process_group(backend="nccl", device_id=device)
 dist.barrier()
 master_process = (rank == 0) # this process will do logging, checkpointing etc.
 
+# Ensure batch size is reasonable
+max_tokens_per_gpu = 2**30  # Example: 1 GiB of tokens per GPU
+train_batch_size = world_size * args.train_seq_len
+val_batch_size = world_size * args.val_seq_len
+assert train_batch_size <= max_tokens_per_gpu * world_size, "Train batch size exceeds memory limits"
+assert val_batch_size <= max_tokens_per_gpu * world_size, "Validation batch size exceeds memory limits"
+
+# Adjust validation steps
+assert args.val_tokens % val_batch_size == 0, "Validation tokens must be divisible by the validation batch size"
+val_steps = args.val_tokens // val_batch_size
+
+# Logging adjustments
+if master_process:
+    print(f"Using {world_size} GPUs")
+    print(f"Train batch size: {train_batch_size}, Validation batch size: {val_batch_size}")
+
 # begin logging
 logfile = None
 if master_process:
-    run_id = uuid.uuid4()
+    run_id = uuid.uuid4() if run_name is None else run_name
     os.makedirs("logs", exist_ok=True)
     logfile = f"logs/{run_id}.txt"
     print(logfile)
@@ -545,7 +661,7 @@ def get_window_size_blocks(step: int):
     return get_window_size_blocks_helper(window_size)
 
 model: nn.Module = torch.compile(model, dynamic=False)
-
+# model: nn.Module = model.to(device=device, dtype=torch.bfloat16)
 ########################################
 #            Warmup kernels            #
 ########################################
@@ -571,7 +687,7 @@ del initial_state
 #        Training and validation       #
 ########################################
 
-train_loader = distributed_data_generator(args.train_files, world_size * args.train_seq_len, rank, world_size)
+train_loader = distributed_data_generator(args.train_files, train_batch_size, rank, world_size)
 training_time_ms = 0
 # start the clock
 torch.cuda.synchronize()
@@ -587,9 +703,6 @@ for step in range(train_steps + 1):
         torch.cuda.synchronize()
         training_time_ms += 1000 * (time.perf_counter() - t0)
         model.eval()
-        val_batch_size = world_size * args.val_seq_len
-        assert args.val_tokens % val_batch_size == 0
-        val_steps = args.val_tokens // val_batch_size
         val_loader = distributed_data_generator(args.val_files, val_batch_size, rank, world_size)
         val_loss = 0
         with torch.no_grad():
@@ -632,7 +745,7 @@ for step in range(train_steps + 1):
     model.zero_grad(set_to_none=True)
     # logging
     approx_training_time_ms = training_time_ms + 1000 * (time.perf_counter() - t0)
-    print0(f"step:{step+1}/{train_steps} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
+    print0(f"step:{step+1}/{train_steps} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms world_size:{world_size}", console=True)
 
 print0(f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
        f"reserved: {torch.cuda.max_memory_reserved() // 1024 // 1024} MiB", console=True)
