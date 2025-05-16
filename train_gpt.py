@@ -225,8 +225,10 @@ def zeropower_via_newtonschulz5(G: Tensor, steps: int) -> Tensor:
 
 if args_cli.mat_sign == "polar":
     mat_sign_function = polar_express
+    print("Using polar express")
 else:
     mat_sign_function = zeropower_via_newtonschulz5
+    print("Using zeropower_via_newtonschulz5")
 
 
 class Muon(torch.optim.Optimizer):

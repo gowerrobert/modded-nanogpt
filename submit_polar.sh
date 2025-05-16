@@ -4,7 +4,7 @@ NUM_GPUS="$2"
 
 sbatch <<EOF
 #!/bin/bash
-#SBATCH -J Newton5-${NAME}
+#SBATCH -J Polar-${NAME}
 #SBATCH -p gpu
 #SBATCH --ntasks=${NUM_GPUS}
 #SBATCH --nodes=1
@@ -12,7 +12,7 @@ sbatch <<EOF
 #SBATCH --mem=100G
 #SBATCH --gpus-per-task=1
 #SBATCH --time=1:00:00
-#SBATCH -o output/slurm_logs/Newton5-${NAME}.log
+#SBATCH -o output/slurm_logs/Polar-${NAME}.log
 #SBATCH --mail-type=BEGIN  # Send an email when the job starts
 #SBATCH --mail-user=rgower@flatironinstitute.org  # Your email address
 
@@ -23,5 +23,5 @@ source nano11/bin/activate
 module list 
 
 # Run the Python script with the config file
-time torchrun --standalone --nproc_per_node=${NUM_GPUS} train_gpt.py --mat_sign polar --name Polar-${NAME}  --num_iterations 10
+time torchrun --standalone --nproc_per_node=${NUM_GPUS} train_gpt.py --mat_sign polar --name Polar-${NAME}  --num_iterations 100
 EOF
