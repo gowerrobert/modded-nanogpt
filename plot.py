@@ -20,9 +20,9 @@ gpu8_logs = {
     # "PolarExpress": "logs/Polar-2k-iter-8GPU.txt" 
 #    "NewtonSchulz5": "logs/Newton5-2.5k-8GPU.txt",
 #    "PolarExpress": "logs/Polar-2.5k-8GPU.txt" 
-   "NewtonSchulz5": "logs/med-Newton5-fixedp.txt",
+   "NewtonSchulz5": "logs/newton-maybe.txt",
 #    "PolarExpress": "logs/med-Polar-10min7.txt" 
-   "PolarExpress":  "logs/med-Polar-defl-pow.txt"
+   "PolarExpress":  "logs/polar-maybe.txt"
 }
 # Regex patterns to extract step, validation loss, and time
 patterns = [

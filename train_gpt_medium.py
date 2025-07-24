@@ -20,8 +20,8 @@ from torch.nn.attention.flex_attention import BlockMask, flex_attention
 torch._inductor.config.coordinate_descent_tuning = True # we allow this flag for medium track
 torch._dynamo.config.compiled_autograd = True
 
-import argparse
-parser = argparse.ArgumentParser()
+
+
 parser.add_argument('--name', type=str, default=None, help='Run name for logging')
 parser.add_argument('--mat_sign', type=str, default=None, help='Name of matrix sign method')
 parser.add_argument('--num_iterations', type=int, default=2000, help='Number of iterations to run')
