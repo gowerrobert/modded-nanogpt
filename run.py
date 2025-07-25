@@ -12,7 +12,7 @@ import torch.distributed as dist
 from torch import  nn
 import copy
 import json
-
+from nanogpt.train_gpt import train
 
 parser = argparse.ArgumentParser(description='Train GPT-2 with optional config file.')
 parser.add_argument('--config', type=str, help='Path to config file', default=None)
@@ -104,7 +104,7 @@ for opt_config in list_optimizer_params:
         opt_config_copy = copy.deepcopy(opt_config)
         opt_config_copy['lr'] = lr
         config_hash = hash_config(opt_config_copy, training_params)
-        file_name = f"{opt_config['name']}-lr-{lr}-{opt_config['lr_schedule']}-{config_hash}-world{world_size}"
+        file_name = f"{opt_config['name']}-lr-{lr}-{config_hash}-world{world_size}"
         if args.suffix != '': file_name += f"-{args.suffix}"
         output_path = os.path.join(output_dir, file_name + '.json')
 
@@ -121,7 +121,7 @@ for opt_config in list_optimizer_params:
                 group["initial_lr"] = group["lr"]
 
         # Train and log of results
-        logger = train(model_copy, optimizers, configs['training_params'], opt_config)
+        logger = train(model_copy, optimizers, training_params, opt_config)
 
         # Save
         if master_process:

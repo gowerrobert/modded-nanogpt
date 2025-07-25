@@ -1,4 +1,5 @@
 import hashlib
+import json 
 
 def hash_config(optimizer_config, training_params):
     """

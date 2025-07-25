@@ -4,6 +4,7 @@ from torch import Tensor, nn
 from torch.nn.attention.flex_attention import BlockMask, flex_attention
 from functools import partial
 import torch.distributed as dist
+import torch.nn.functional as F
 # -----------------------------------------------------------------------------
 # PyTorch nn.Module definitions for the model
 

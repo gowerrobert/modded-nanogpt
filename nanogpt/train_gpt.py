@@ -7,8 +7,8 @@ import copy
 
 
 from functools import lru_cache # Added partial for hook registration
-from dataloader import distributed_data_generator
-from model import GPT
+from nanogpt.dataloader import distributed_data_generator
+from nanogpt.model import GPT
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 torch.empty(1, device="cuda", requires_grad=True).backward() # prevents a bug on some systems
@@ -27,8 +27,8 @@ class Logging():
         self.max_memory_allocated =0
 
 def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_config: dict, opt_config: dict) -> Logging:
-
-    num_iterations = train_config["num_iteration"]
+    world_size = int(os.environ["WORLD_SIZE"])
+    num_iterations = train_config["num_iterations"]
 
     def next_multiple_of_n(v: float | int, *, n: int):
         return next(x for x in range(n, int(v) + 1 + n, n) if x >= v)

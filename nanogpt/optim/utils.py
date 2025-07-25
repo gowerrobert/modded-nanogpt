@@ -2,7 +2,6 @@ import torch
 from torch.optim.lr_scheduler import LambdaLR, StepLR
 import warnings
 from typing import Tuple
-from transformers import get_cosine_schedule_with_warmup
 from .muon_polar import Muon
 from .muon_nano import MuonNano
 # from .sps import SPS
