@@ -44,6 +44,8 @@ with open(config_file, 'r') as file:
 #config = load_config(get_default_config(), config_file)
 outputname = config_file.replace("configs/","").replace('.yaml','')
 output_dir = f"nanogpt/outputs/{outputname}"
+
+
 if master_process:
     print(f"Loading configuration from {config_file}")
     os.makedirs(output_dir, exist_ok=True)   
@@ -83,23 +85,13 @@ for m in model.modules():
 for param in model.parameters():
     dist.broadcast(param.detach(), 0)
 
-# collect the parameters to optimize
-hidden_matrix_params = [p for n, p in model.blocks.named_parameters() if p.ndim >= 2 and "embed" not in n]
-embed_params = [p for n, p in model.named_parameters() if "embed" in n]
-scalar_params = [p for p in model.parameters() if p.ndim < 2]
-head_params = [model.lm_head.weight]
-
-# init the optimizer(s)
-# small adam epsilon by @YouJiacheng. this is an alternate method of fixing the world_size dependence
-# discovered by @fernbear.bsky.social https://x.com/hi_tysam/status/1879692937589875094
 training_params = config['training_params'] 
 list_optimizer_params = config["optimizer_params"]
-
-model: nn.Module = torch.compile(model, dynamic=False)
-
 # Loop over optimizers
 for opt_config in list_optimizer_params:
     for lr in opt_config['lr']:
+        if master_process:
+            print(f"Training with optimizer {opt_config['name']} and learning rate {lr}")
         # Generate hash for the current optimizer configuration
         opt_config_copy = copy.deepcopy(opt_config)
         opt_config_copy['lr'] = lr
@@ -110,7 +102,12 @@ for opt_config in list_optimizer_params:
 
         # copy model to ensure consistency
         model_copy = copy.deepcopy(model).to(device)
-
+        model_copy: nn.Module = torch.compile(model_copy, dynamic=False)
+        # collect the parameters to optimize
+        hidden_matrix_params = [p for n, p in model_copy.blocks.named_parameters() if p.ndim >= 2 and "embed" not in n]
+        embed_params = [p for n, p in model_copy.named_parameters() if "embed" in n]
+        scalar_params = [p for p in model_copy.parameters() if p.ndim < 2]
+        head_params = [model_copy.lm_head.weight]
         # Get muon and version adam
         muon_optimizer_obj, muon_hyper_param  = get_optimizer(opt_config)   # NOT USING muon_hyper_param
         muon_optimizer = muon_optimizer_obj(hidden_matrix_params, lr=lr, momentum=opt_config['momentum'], weight_decay=opt_config['weight_decay'])
@@ -131,3 +128,4 @@ for opt_config in list_optimizer_params:
             with open(output_path, 'w') as file:
                 json.dump(logger.__dict__, file)
             print(f"Saved output to {output_path}")
+        del model_copy

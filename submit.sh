@@ -1,5 +1,5 @@
 #!/bin/bash
-CONFIG_NAME="$1"
+CONFIG_NAME=$(basename "$1" .yaml)
 NUM_GPUS="$2"
 
 sbatch <<EOF
@@ -11,8 +11,8 @@ sbatch <<EOF
 #SBATCH --constraint=h100
 #SBATCH --mem=200G
 #SBATCH --gpus-per-task=1
-#SBATCH --time=2:00:00
-#SBATCH -o output/slurm_logs/${CONFIG_NAME}.log
+#SBATCH --time=100:00:00
+#SBATCH -o slurm_logs/${CONFIG_NAME}.log
 #SBATCH --mail-type=BEGIN  # Send an email when the job starts
 #SBATCH --mail-user=rgower@flatironinstitute.org  # Your email address
 
@@ -23,6 +23,6 @@ source nano11/bin/activate
 module list 
 
 # Run the Python script with the config file
-time torchrun --standalone --nproc_per_node=${NUM_GPUS} run.py --config ${CONFIG_NAME}  
+time torchrun --standalone --nproc_per_node=${NUM_GPUS} run.py --config $1
 EOF
 

@@ -1,11 +1,7 @@
 import os
 import sys
-with open(sys.argv[0]) as f:
-    code = f.read() # read the code of this file ASAP, for logging
 import time
 import copy
-
-
 from functools import lru_cache # Added partial for hook registration
 from nanogpt.dataloader import distributed_data_generator
 from nanogpt.model import GPT
@@ -16,7 +12,11 @@ from torch import Tensor, nn
 import torch.nn.functional as F
 import torch.distributed as dist
 
-#torch._inductor.config.coordinate_descent_tuning = True # we have banned this flag for new records because it causes compilation to take 30min
+rank = int(os.environ["RANK"])
+master_process = (rank == 0)
+def print0(s, console=False):
+    if master_process:
+        print(s)
 
 class Logging():
     def __init__(self):
@@ -70,10 +70,10 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
     def get_lr(step: int):  
         x = step / num_iterations # progress in training
         assert 0 <= x < 1
-        if x < 1 - opt_config['cool_down_fraction']:
+        if x < 1 - train_config['cooldown_frac']:
             return 1.0
         else:
-            w = (1 - x) / opt_config['cool_down_fraction']
+            w = (1 - x) / train_config['cooldown_frac']
             return w * 1.0 + (1 - w) * 0.1
 
     ########################################
@@ -86,7 +86,7 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
     torch.cuda.synchronize()
     t0 = time.perf_counter()
     # begin training
-    for step in range(num_iterations + 1):
+    for step in range(num_iterations):
         last_step = (step == num_iterations)
 
         # --------------- VALIDATION SECTION -----------------
@@ -109,13 +109,12 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
             dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
             print0(f"step:{step}/{num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/max(step, 1):.2f}ms", console=True)
             logger.val_losses.append(val_loss)
-            logger.train_time(training_time_ms)
+            logger.train_times.append(training_time_ms)
             logger.step_times.append(training_time_ms / max(step, 1))
             model.train()
             # start the clock again
             torch.cuda.synchronize()
             t0 = time.perf_counter()
-
 
         # --------------- TRAINING SECTION -----------------
         inputs, targets = next(train_loader)
@@ -125,7 +124,7 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
             for group in opt.param_groups:
                 group["lr"] = group["initial_lr"] * get_lr(step)
         optimizer1, optimizer2 = optimizers
-        for group in optimizer[1].param_groups:
+        for group in optimizers[1].param_groups:
             frac = min(step / 300, 1) # momentum warmup for muon
             group["momentum"] = (1 - frac) * 0.85 + frac * 0.95
         # step the optimizers
@@ -136,7 +135,7 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
         # logging
         approx_training_time_ms = training_time_ms + 1000 * (time.perf_counter() - t0)
         print0(f"step:{step+1}/{num_iterations} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
-        logger.train_time(approx_training_time_ms)
+        logger.train_times.append(approx_training_time_ms)
         logger.step_times.append(approx_training_time_ms)
     print0(f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
         f"reserved: {torch.cuda.max_memory_reserved() // 1024 // 1024} MiB", console=True)

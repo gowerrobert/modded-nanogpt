@@ -23,11 +23,11 @@ polar_express_coeffs_list = [
 @torch.compile
 def PolarExpress(G: torch.Tensor, steps, frob_eps=1e-2, deflation_eps=1e-2):
     assert G.ndim >= 2, "Input tensor must have at least two dimensions."
-    X = G.bfloat16()
+    X = G 
     if G.size(-2) > G.size(-1):  # opposite convention from our other code
         X = X.mT
     # Ensure spectral norm is at most 1
-    X = X / (X.norm(dim=(-2, -1), keepdim=True) * (1 + frob_eps))
+    X = X / (X.norm(dim=(-2, -1), keepdim=True) * (1 + frob_eps) + 1e-7)
 
     hs = polar_express_coeffs_list[:steps] + list(repeat(polar_express_coeffs_list[-1], steps - len(polar_express_coeffs_list)))
     for a, b, c in hs:
@@ -42,6 +42,46 @@ def PolarExpress(G: torch.Tensor, steps, frob_eps=1e-2, deflation_eps=1e-2):
         X = X.mT
     return X
 
+    def trace_inner_product_eisum(grad: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+        """
+        Computes the trace inner product between `grad` and `v`.
+        - If `grad` and `v` are 2D matrices, it computes torch.trace(grad.T @ v).
+        - If `grad` and `v` are 3D tensors, it computes the sum of trace inner products
+        over the batch dimension.
+
+        Args:
+            grad (torch.Tensor): Gradient tensor of shape (dim, dim) or (batch, dim, dim).
+            v (torch.Tensor): Tensor of shape (dim, dim) or (batch, dim, dim).
+
+        Returns:
+            torch.Tensor: The trace inner product (scalar).
+        """
+        # Use einsum to compute the trace inner product
+        return torch.einsum("...ij,...ji->...", grad, v).sum()
+
+def trace_inner_product(grad: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
+    """
+    Computes the trace inner product between `grad` and `v`.
+    - If `grad` and `v` are 2D matrices, it computes torch.trace(grad.T @ v).
+    - If `grad` and `v` are 3D tensors, it computes the sum of trace inner products
+      over the batch dimension.
+
+    Args:
+        grad (torch.Tensor): Gradient tensor of shape (dim, dim) or (batch, dim, dim).
+        v (torch.Tensor): Tensor of shape (dim, dim) or (batch, dim, dim).
+
+    Returns:
+        torch.Tensor: The trace inner product (scalar).
+    """
+    if grad.ndim == 2 and v.ndim == 2:
+        # Case 1: Both are 2D matrices
+        return torch.trace(grad.mT @ v)
+    elif grad.ndim == 3 and v.ndim == 3:
+        # Case 2: Both are 3D tensors
+        # Compute the trace for each batch and sum over the batch dimension
+        return (grad.mT @ v).diagonal(dim1=-2, dim2=-1).sum(-1).sum()
+    else:
+        raise ValueError("Both grad and v must have the same dimensions (either 2D or 3D).")
 
 class Muon(torch.optim.Optimizer):
     """
@@ -113,9 +153,14 @@ class Muon(torch.optim.Optimizer):
                     p.mul_(1 - eff_weight_decay)
                     momentum_buffer.lerp_(grad, 1 - momentum)
                     grad = grad.lerp_(momentum_buffer, momentum)
-                    v = PolarExpress(grad.bfloat16(), steps=group["ns_steps"]) 
+                    # print( " p shape: ", p.shape)
+                    v = PolarExpress(grad.bfloat16(), steps=5) #group["ns_steps"]
+                    # print("v shape: ", v.shape, "  grad shape: ", grad.shape)
                     # Compute nuc_norm_grad using grad and v
-                    nuc_norm_grad = torch.trace(g.bfloat16().T @ v) 
+                    nuc_norm_grad = trace_inner_product(grad.bfloat16(), v)
+                    # print("nuc_norm_grad: ", nuc_norm_grad)
+                    # nuc_norm_grad =  torch.trace(torch.matmul(grad.bfloat16(), v))
+                    # nuc_norm_grad = torch.trace(grad.bfloat16().mT @ v) 
                     # Accumulate local sum of nuc_norm_grad
                     local_nuc_norm_sum += nuc_norm_grad
                     eff_lr = prev_global_nuc_norm_sum*eff_lr
