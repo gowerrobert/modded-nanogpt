@@ -1,8 +1,7 @@
 import yaml
 import argparse
 import matplotlib.pyplot as plt
-from gptopt.utils import get_default_config, load_config
-from gptopt.plot_utils import get_alpha_from_lr, plot_data,  smoothen_dict
+from nanogpt.plot_utils import get_alpha_from_lr, plot_data,  smoothen_dict
 import copy
 import json
 import os
@@ -112,7 +111,7 @@ def plot_tuned_curves(outputs, colormap, linestylemap, outfilename, num_epochs, 
     # Plot loss of tuned methods.
     tuned_outputs = [tuned_methods[name]['outputs'] for name in tuned_methods]
     lr_ranges = {name: [tuned_methods[name]['best_lr']] * 2 for name in tuned_methods}
-    plot_data(ax, tuned_outputs, 1, field, 'Loss', colormap, linestylemap, lr_ranges, get_alpha_from_lr, wallclock=wallclock)
+    plot_data(ax, tuned_outputs,  'val_losses', 'val_losses',  colormap, linestylemap, lr_ranges, get_alpha_from_lr, wallclock=wallclock)
     upper_bound = np.max([output[field][round(0.2 * len(output[field]))] for output in tuned_outputs ])
     lower_bound = 100
     for output in tuned_outputs:
@@ -132,11 +131,11 @@ def plot_tuned_curves(outputs, colormap, linestylemap, outfilename, num_epochs, 
 
 
 def main(config_file=None):
-    default_config = get_default_config()
-    if config_file:
-        config = load_config(default_config, config_file)
+
+    with open(config_file, 'r') as file:
+        config = yaml.safe_load(file)
     outfilename = config_file.replace("configs/", "").replace('.yaml', '')
-    output_dir = f"gptopt/outputs/{outfilename}"
+    output_dir = f"nanogpt/outputs/{outfilename}"
     outputs = load_outputs(output_dir)
 
     print(f"Loaded {len(outputs)} outputs from {output_dir}")
@@ -149,9 +148,9 @@ def main(config_file=None):
         'sgd-m': '#B3CBB9',  # Keep the same color for 'sgd-m'
         'adamw': '#FF6B35',  # Keep the same color for 'adamw'
         'iams': '#61ACE5',  # Light blue for 'iams'
-        'iams-adam': '#1B75BC',  # Darker blue for 'iams-adam' (similar to 'iams')
+        'muon-nano': '#1B75BC',  # Darker blue for 'iams-adam' (similar to 'iams')
         'teacher': 'k',  # Keep black for 'teacher'
-        'sgd-schedulep': '#FF00FF',  # Magenta for 'sgd-schedulep' (similar to 'adamw-schedulep')
+        'muon-max': '#FF00FF',  # Magenta for 'sgd-schedulep' (similar to 'adamw-schedulep')
         'adamw-schedulep': '#8B008B',  # Magenta for 'adamw-schedulep' (same as 'sgd-schedulep')
         'sgd-schedulefree': '#008000',  # Green for 'sgd-schedulefree' (keep the same)
         'adamw-schedulefree': '#006400',  # Dark green for 'adamw-schedulefree' (similar to 'sgd-schedulefree')
@@ -182,13 +181,13 @@ def main(config_file=None):
                     'sgd-m': None,
                     'sgd-sch': '--',
                     'teacher': '--',
-                    'iams-adam': None,
+                    'muon-nano': None,
                     'adam': None,
                     'adamw': '--',
                     'adam-sch': '--',
                     'muon': None,
                     'muon-nonlmo': None,
-                    'sgd-schedulep': None,
+                    'muon-max': None,
                     'sgd-schedulefree': None,
                     'teacher': None,
                     'muon-l2_prod': None,
@@ -220,11 +219,12 @@ def main(config_file=None):
     plot_final_loss_vs_lr(outputs, colormap, linestylemap, outfilename, val=True)
 
     # Plot loss
-    initial_loss = outputs[0]['losses'][0] if outputs and 'losses' in outputs[0] else 1.0  # Default to 1.0 if not available
+    # import pdb; pdb.set_trace()
+    initial_loss = outputs[0]['val_losses'][0] if outputs and 'val_losses' in outputs[0] else 1.0  # Default to 1.0 if not available
     upper_bound = initial_loss * 1.2  # Set upper bound to 20% above the initial loss
     fig, ax = plt.subplots(figsize=(4, 3))
-    plot_data(ax, outputs,  1, 'losses', 'Loss', colormap, linestylemap, lr_ranges, get_alpha_from_lr)
-    lower_bound = min(min(output['losses']) for output in outputs if 'losses' in output)
+    plot_data(ax, outputs,  'val_losses', 'val_losses',  colormap, linestylemap, lr_ranges, get_alpha_from_lr)
+    lower_bound = min(min(output['val_losses']) for output in outputs if 'val_losses' in output)
     lower_bound *= 0.95 
     ax.set_ylim(lower_bound, upper_bound) # Set the upper bound
     ax.legend(loc='upper right', fontsize=10)
@@ -232,7 +232,7 @@ def main(config_file=None):
     fig.savefig('figures/' + outfilename + '.pdf', format='pdf', bbox_inches='tight')
 
     # Plot loss curves of tuned algorithms.
-    plot_tuned_curves(outputs, colormap, linestylemap, outfilename, config['training_params']['num_epochs'], wallclock=False, val=True)
+    plot_tuned_curves(outputs, colormap, linestylemap, outfilename, 1, wallclock=False, val=True)
 
 
 

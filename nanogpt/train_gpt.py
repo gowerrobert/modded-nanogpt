@@ -69,7 +69,7 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
     ########################################
     def get_lr(step: int):  
         x = step / num_iterations # progress in training
-        assert 0 <= x < 1
+        assert 0 <= x <= 1
         if x < 1 - train_config['cooldown_frac']:
             return 1.0
         else:
@@ -86,7 +86,7 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
     torch.cuda.synchronize()
     t0 = time.perf_counter()
     # begin training
-    for step in range(num_iterations):
+    for step in range(num_iterations+1):
         last_step = (step == num_iterations)
 
         # --------------- VALIDATION SECTION -----------------
@@ -108,7 +108,7 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
             del val_loader
             dist.all_reduce(val_loss, op=dist.ReduceOp.AVG)
             print0(f"step:{step}/{num_iterations} val_loss:{val_loss:.4f} train_time:{training_time_ms:.0f}ms step_avg:{training_time_ms/max(step, 1):.2f}ms", console=True)
-            logger.val_losses.append(val_loss)
+            logger.val_losses.append(val_loss.item())
             logger.train_times.append(training_time_ms)
             logger.step_times.append(training_time_ms / max(step, 1))
             model.train()
@@ -139,6 +139,5 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
         logger.step_times.append(approx_training_time_ms)
     print0(f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
         f"reserved: {torch.cuda.max_memory_reserved() // 1024 // 1024} MiB", console=True)
-    dist.destroy_process_group()
 
     return logger

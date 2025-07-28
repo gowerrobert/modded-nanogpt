@@ -129,3 +129,4 @@ for opt_config in list_optimizer_params:
                 json.dump(logger.__dict__, file)
             print(f"Saved output to {output_path}")
         del model_copy
+dist.destroy_process_group()
