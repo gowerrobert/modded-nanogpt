@@ -4,7 +4,6 @@ import time
 import copy
 from functools import lru_cache # Added partial for hook registration
 from nanogpt.dataloader import distributed_data_generator
-from nanogpt.model import GPT
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 import torch
 torch.empty(1, device="cuda", requires_grad=True).backward() # prevents a bug on some systems
@@ -23,6 +22,7 @@ class Logging():
         self.val_losses = []
         self.train_times = []
         self.step_times = []
+        self.learning_rates = []
         self.max_memory_reserved =0
         self.max_memory_allocated =0
 
@@ -123,6 +123,8 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
         for opt in optimizers:
             for group in opt.param_groups:
                 group["lr"] = group["initial_lr"] * get_lr(step)
+            av_lr = sum(group["lr"] for group in opt.param_groups) / len(opt.param_groups)
+            logger.learning_rates.append(av_lr)
         optimizer1, optimizer2 = optimizers
         for group in optimizers[1].param_groups:
             frac = min(step / 300, 1) # momentum warmup for muon
@@ -135,7 +137,7 @@ def train(model: nn.Module, optimizers: list[torch.optim.Optimizer],  train_conf
         # logging
         approx_training_time_ms = training_time_ms + 1000 * (time.perf_counter() - t0)
         print0(f"step:{step+1}/{num_iterations} train_time:{approx_training_time_ms:.0f}ms step_avg:{approx_training_time_ms/(step + 1):.2f}ms", console=True)
-        logger.train_times.append(approx_training_time_ms)
+        logger.train_times.append(training_time_ms)
         logger.step_times.append(approx_training_time_ms)
     print0(f"peak memory allocated: {torch.cuda.max_memory_allocated() // 1024 // 1024} MiB "
         f"reserved: {torch.cuda.max_memory_reserved() // 1024 // 1024} MiB", console=True)

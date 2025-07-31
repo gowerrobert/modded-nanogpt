@@ -15,7 +15,6 @@ sbatch <<EOF
 #SBATCH -o slurm_logs/${CONFIG_NAME}.log
 #SBATCH --mail-type=BEGIN  # Send an email when the job starts
 #SBATCH --mail-user=rgower@flatironinstitute.org  # Your email address
-#SBATCH --exclude=workergpu157,workergpu156
 
 export OMP_NUM_THREADS=1
 source nano11/bin/activate

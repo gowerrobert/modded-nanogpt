@@ -29,11 +29,14 @@ def plot_data(ax, outputs, field, ylabel, colormap, linestylemap, lr_ranges, alp
 
         zorder = zorder_func(name) if zorder_func else 1
         if wallclock:
-            assert len(output["step_times"]) % len(output[field]) == 0
-            step_factor = len(output["step_times"]) // len(output[field])
-            step_times = np.array(output["step_times"])
-            step_times = np.sum(step_times.reshape((len(output[field]), step_factor)), axis=1)
-            xs = np.cumsum(step_times)
+            # assert len(output["step_times"]) % len(output[field]) == 0
+            # step_factor = len(output["step_times"]) // len(output[field])
+            # step_times = np.array(output["step_times"])
+            # step_times = np.sum(step_times.reshape((len(output[field]), step_factor)), axis=1)
+            # xs = np.cumsum(step_times)
+            last_step_time = output["step_times"][-1]
+            xs = (last_step_time / (np.arange(len(output[field])) + 1))[::-1]
+            xs = xs/ 60000  # Convert from miliseconds to minutes
         else:
             xs = np.arange(len(output[field]))
 
@@ -47,7 +50,7 @@ def plot_data(ax, outputs, field, ylabel, colormap, linestylemap, lr_ranges, alp
                 zorder=zorder)
         plotted_methods.add(name)
 
-    xlabel = "Seconds" if wallclock else "Epochs"
+    xlabel = "Minutes" if wallclock else "Iterations"
     ax.set_xlabel(xlabel)
     ax.set_ylabel(ylabel)
     ax.grid(axis='both', lw=0.2, ls='--', zorder=0)

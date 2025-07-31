@@ -83,7 +83,7 @@ def trace_inner_product(grad: torch.Tensor, v: torch.Tensor) -> torch.Tensor:
     else:
         raise ValueError("Both grad and v must have the same dimensions (either 2D or 3D).")
 
-class Muon(torch.optim.Optimizer):
+class MuonMax(torch.optim.Optimizer):
     """
     Muon - MomentUm Orthogonalized by Newton-schulz
 

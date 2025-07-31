@@ -68,7 +68,8 @@ def plot_final_loss_vs_lr(outputs, colormap, linestylemap, outfilename, val=Fals
             lower_bound = current_lb
     upper_bound *= 1.1
     upper_bound = min(upper_bound, 10.0)
-    lower_bound *= 0.95
+    upper_bound = 4.0
+    lower_bound *= 0.99
     ax.set_xscale('log')
     ax.set_ylim([lower_bound, upper_bound])
     ax.set_xlabel('Learning Rate')
@@ -118,7 +119,7 @@ def plot_tuned_curves(outputs, colormap, linestylemap, outfilename, num_epochs, 
         lower_bound = float(np.minimum(lower_bound, np.min(output[field] ) ))
     upper_bound = min(upper_bound, 10.0) if not np.isnan(upper_bound) else 10.0
     lower_bound = max(lower_bound, 3.0) if not np.isnan(lower_bound) else 3.0
-    lower_bound *= 0.95
+    lower_bound *= 0.99
     ax.legend(loc='upper right', fontsize=10)
     ax.set_ylim(lower_bound, upper_bound)
     fig.subplots_adjust(top=0.99, bottom=0.155, left=0.12, right=0.99)
@@ -233,7 +234,7 @@ def main(config_file=None):
 
     # Plot loss curves of tuned algorithms.
     plot_tuned_curves(outputs, colormap, linestylemap, outfilename, 1, wallclock=False, val=True)
-
+    plot_tuned_curves(outputs, colormap, linestylemap, outfilename, 1, wallclock=True, val=True)
 
 
 if __name__ == "__main__":

@@ -22,6 +22,7 @@ class DistAdam(torch.optim.Optimizer):
         reduce_scatter_futures: list[torch.Future] = []
         all_reduce_futures: list[torch.Future] = []
         grad_slices = []
+        
         for group in self.param_groups:
             params: list[Tensor] = group["params"]
             grad = torch.empty_like(params[-1])

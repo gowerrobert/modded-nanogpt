@@ -12,6 +12,7 @@ import torch.nn.functional as F
 #            Nano-GPT voodoo             #
 ########################################
 # Custom operators: FP8 matmul by @YouJiacheng
+
 @torch.library.custom_op("nanogpt::mm", mutates_args=())
 def mm_op(x: Tensor, w: Tensor, x_s: float, w_s: float, grad_s: float) -> tuple[Tensor, Tensor, Tensor]:
     @torch.compile
