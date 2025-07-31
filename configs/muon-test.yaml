@@ -1,0 +1,24 @@
+# config.yaml
+optimizer_params:
+  - name: muon-max
+    # lr: [0.005,  0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05, 0.055, 0.06]
+    lr: [4.5e-07]
+    adam_lr: 0.008
+    weight_decay: 0.0
+    momentum: 0.95
+
+  - name: muon-nano
+    # lr: [0.005,  0.01, 0.015, 0.02, 0.025, 0.03, 0.035, 0.04, 0.045, 0.05, 0.055, 0.06]
+    lr: [0.02]
+    adam_lr: 0.008
+    weight_decay: 0.0
+    momentum: 0.95
+
+  
+training_params:
+  num_iterations: 1750
+  compile: True
+
+
+dataset:
+  name: "fineweb1B"
